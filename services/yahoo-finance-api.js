@@ -1,192 +1,319 @@
-/**
- * Stock Metrics API
- * ------------------
- * Free, keyless stock data via Yahoo Finance's public JSON feed
- * (wrapped by the `yahoo-finance2` npm package). No API key or
- * account signup required.
- */
+const express = require("express");
+const router = express.Router();
 const YahooFinance = require("yahoo-finance2").default;
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ suppressNotices: ["ripHistorical"] });
+const { cached } = require("./cache");
 
-// ---------- Helpers ----------
+// How long each kind of data stays in memory before asking Yahoo again
+const MINUTE = 60 * 1000;
+const TTL = {
+    quote: 5 * MINUTE, // single / multiple quotes
+    top100: 30 * MINUTE, // the whole top-100 list
+    history: 60 * MINUTE, // price history
+    summary: 6 * 60 * MINUTE, // company fundamentals
+    search: 24 * 60 * MINUTE, // symbol search
+    btcHistory: 12 * 60 * MINUTE, // BTC daily history since 2014
+};
 
-function pct(n) {
-    return typeof n === "number" ? Number((n * 100).toFixed(2)) : null;
+const topUniverse = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "AVGO",
+    "TSLA",
+    "GOOG",
+    "BRK-B",
+    "WMT",
+    "LLY",
+    "JPM",
+    "V",
+    "XOM",
+    "JNJ",
+    "MA",
+    "ORCL",
+    "COST",
+    "HD",
+    "PG",
+    "NFLX",
+    "BAC",
+    "ABBV",
+    "CRM",
+    "CVX",
+    "KO",
+    "MRK",
+    "AMD",
+    "PEP",
+    "TMO",
+    "ADBE",
+    "WFC",
+    "ACN",
+    "MCD",
+    "LIN",
+    "CSCO",
+    "IBM",
+    "ABT",
+    "PM",
+    "GE",
+    "INTU",
+    "ISRG",
+    "CAT",
+    "TXN",
+    "QCOM",
+    "VZ",
+    "AMGN",
+    "NOW",
+    "PFE",
+    "CMCSA",
+    "UBER",
+    "AMAT",
+    "NEE",
+    "RTX",
+    "GS",
+    "SPGI",
+    "DIS",
+    "LOW",
+    "T",
+    "HON",
+    "BLK",
+    "BKNG",
+    "SYK",
+    "ELV",
+    "TJX",
+    "VRTX",
+    "ADP",
+    "LMT",
+    "DE",
+    "MDT",
+    "GILD",
+    "MMC",
+    "REGN",
+    "SCHW",
+    "C",
+    "MO",
+    "CB",
+    "PGR",
+    "SO",
+    "CI",
+    "ADI",
+    "ETN",
+    "BSX",
+    "ZTS",
+    "CME",
+    "DUK",
+    "ITW",
+    "MU",
+    "EQIX",
+    "PYPL",
+    "USB",
+    "NKE",
+    "COP",
+    "MCO",
+    "APD",
+    "SHW",
+    "ICE",
+    "CL",
+    "WM",
+    "FDX",
+    "MPC",
+    "SBUX",
+    "ORLY",
+    "EOG",
+    "GD",
+];
+
+const topCriteria = {
+    marketCap: { label: "Market cap", direction: "desc" },
+    changePercent: { label: "Daily change", direction: "desc" },
+    volume: { label: "Volume", direction: "desc" },
+    trailingPE: { label: "P/E", direction: "asc" },
+    dividendYield: { label: "Dividend yield", direction: "desc" },
+};
+
+function pct(value) {
+    return typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
 }
 
-function shapeQuote(q) {
+function shapeQuote(quote) {
     return {
-        symbol: q.symbol,
-        name: q.longName || q.shortName || q.symbol,
-        exchange: q.fullExchangeName,
-        currency: q.currency,
-        marketState: q.marketState,
-        price: q.regularMarketPrice ?? null,
-        change: q.regularMarketChange ?? null,
-        changePercent: q.regularMarketChangePercent
-            ? Number(q.regularMarketChangePercent.toFixed(2))
+        symbol: quote.symbol,
+        name: quote.longName || quote.shortName || quote.symbol,
+        exchange: quote.fullExchangeName,
+        currency: quote.currency,
+        marketState: quote.marketState,
+        price: quote.regularMarketPrice ?? null,
+        change: quote.regularMarketChange ?? null,
+        changePercent: quote.regularMarketChangePercent
+            ? Number(quote.regularMarketChangePercent.toFixed(2))
             : null,
-        open: q.regularMarketOpen ?? null,
-        dayHigh: q.regularMarketDayHigh ?? null,
-        dayLow: q.regularMarketDayLow ?? null,
-        previousClose: q.regularMarketPreviousClose ?? null,
-        volume: q.regularMarketVolume ?? null,
-        avgVolume3Month: q.averageDailyVolume3Month ?? null,
-        marketCap: q.marketCap ?? null,
-        trailingPE: q.trailingPE ?? null,
-        forwardPE: q.forwardPE ?? null,
-        epsTrailingTwelveMonths: q.epsTrailingTwelveMonths ?? null,
-        epsForward: q.epsForward ?? null,
-        priceToBook: q.priceToBook ?? null,
-        fiftyTwoWeekHigh: q.fiftyTwoWeekHigh ?? null,
-        fiftyTwoWeekLow: q.fiftyTwoWeekLow ?? null,
-        fiftyDayAverage: q.fiftyDayAverage ?? null,
-        twoHundredDayAverage: q.twoHundredDayAverage ?? null,
-        dividendYield: q.trailingAnnualDividendYield
-            ? pct(q.trailingAnnualDividendYield)
+        open: quote.regularMarketOpen ?? null,
+        dayHigh: quote.regularMarketDayHigh ?? null,
+        dayLow: quote.regularMarketDayLow ?? null,
+        previousClose: quote.regularMarketPreviousClose ?? null,
+        volume: quote.regularMarketVolume ?? null,
+        avgVolume3Month: quote.averageDailyVolume3Month ?? null,
+        marketCap: quote.marketCap ?? null,
+        trailingPE: quote.trailingPE ?? null,
+        forwardPE: quote.forwardPE ?? null,
+        epsTrailingTwelveMonths: quote.epsTrailingTwelveMonths ?? null,
+        epsForward: quote.epsForward ?? null,
+        priceToBook: quote.priceToBook ?? null,
+        fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh ?? null,
+        fiftyTwoWeekLow: quote.fiftyTwoWeekLow ?? null,
+        fiftyDayAverage: quote.fiftyDayAverage ?? null,
+        twoHundredDayAverage: quote.twoHundredDayAverage ?? null,
+        dividendYield: quote.trailingAnnualDividendYield
+            ? pct(quote.trailingAnnualDividendYield)
             : null,
-        dividendRate: q.trailingAnnualDividendRate ?? null,
-        beta: q.beta ?? null,
-        sharesOutstanding: q.sharesOutstanding ?? null,
-        bookValue: q.bookValue ?? null,
+        dividendRate: quote.trailingAnnualDividendRate ?? null,
+        beta: quote.beta ?? null,
+        sharesOutstanding: quote.sharesOutstanding ?? null,
+        bookValue: quote.bookValue ?? null,
         timestamp: new Date().toISOString(),
     };
 }
 
-function parseRangeToPeriod1(range) {
-    const now = new Date();
-    const d = new Date(now);
-    switch (range) {
-        case "1d":
-            d.setDate(d.getDate() - 1);
-            break;
-        case "5d":
-            d.setDate(d.getDate() - 5);
-            break;
-        case "1mo":
-            d.setMonth(d.getMonth() - 1);
-            break;
-        case "3mo":
-            d.setMonth(d.getMonth() - 3);
-            break;
-        case "6mo":
-            d.setMonth(d.getMonth() - 6);
-            break;
-        case "1y":
-            d.setFullYear(d.getFullYear() - 1);
-            break;
-        case "5y":
-            d.setFullYear(d.getFullYear() - 5);
-            break;
-        case "max":
-            d.setFullYear(d.getFullYear() - 20);
-            break;
-        default:
-            d.setMonth(d.getMonth() - 1); // default 1mo
-    }
-    return d;
+function periodFromRange(range) {
+    const date = new Date();
+    const adjustments = {
+        "1d": () => date.setDate(date.getDate() - 1),
+        "5d": () => date.setDate(date.getDate() - 5),
+        "1mo": () => date.setMonth(date.getMonth() - 1),
+        "3mo": () => date.setMonth(date.getMonth() - 3),
+        "6mo": () => date.setMonth(date.getMonth() - 6),
+        "1y": () => date.setFullYear(date.getFullYear() - 1),
+        "5y": () => date.setFullYear(date.getFullYear() - 5),
+        max: () => date.setFullYear(date.getFullYear() - 20),
+    };
+    (adjustments[range] || adjustments["1mo"])();
+    return date;
 }
 
-// ---------- Routes ----------
+function errorResponse(res, message, error, status = 502) {
+    return res.status(status).json({ error: message, details: error.message });
+}
 
-app.get("/", (req, res) => {
+router.get("/", (_req, res) => {
     res.json({
         name: "Stock Metrics API",
-        endpoints: {
-            "GET /api/stock/:symbol":
-                "Key metrics for a single symbol (e.g. AAPL)",
-            "GET /api/stocks?symbols=AAPL,MSFT,GOOGL":
-                "Key metrics for multiple symbols",
-            "GET /api/stock/:symbol/history?range=1mo&interval=1d":
-                "Historical OHLCV data",
-            "GET /api/stock/:symbol/summary":
-                "Extended fundamentals (financial data, key stats, summary detail)",
-            "GET /api/search?q=apple": "Search for a symbol by company name",
-        },
-        dataSource: "Yahoo Finance public data feed (no API key required)",
+        endpoints: [
+            "GET /api/yahoo/stock/:symbol",
+            "GET /api/yahoo/stocks?symbols=AAPL,MSFT",
+            "GET /api/yahoo/stock/:symbol/history?range=1mo&interval=1d",
+            "GET /api/yahoo/stock/:symbol/summary",
+            "GET /api/yahoo/search?q=apple",
+        ],
+        dataSource: "Yahoo Finance public data feed",
     });
 });
 
-// Single stock metrics
-app.get("/api/stock/:symbol", async (req, res) => {
+router.get("/stock/:symbol", async (req, res) => {
     try {
         const symbol = req.params.symbol.toUpperCase();
-        const quote = await yahooFinance.quote(symbol);
+        const quote = await cached(`quote:${symbol}`, TTL.quote, () =>
+            yahooFinance.quote(symbol),
+        );
         if (!quote)
             return res
                 .status(404)
                 .json({ error: `Symbol '${symbol}' not found` });
         res.json(shapeQuote(quote));
-    } catch (err) {
-        res.status(502).json({
-            error: "Failed to fetch stock data",
-            details: err.message,
-        });
+    } catch (error) {
+        errorResponse(res, "Failed to fetch stock data", error);
     }
 });
 
-// Multiple stocks at once
-app.get("/api/stocks", async (req, res) => {
+router.get("/stocks", async (req, res) => {
     try {
-        const symbolsParam = req.query.symbols;
-        if (!symbolsParam) {
-            return res.status(400).json({
-                error: "Query param 'symbols' is required, e.g. ?symbols=AAPL,MSFT",
-            });
-        }
-        const symbols = symbolsParam
+        const symbols = String(req.query.symbols || "")
             .split(",")
-            .map((s) => s.trim().toUpperCase())
+            .map((symbol) => symbol.trim().toUpperCase())
             .filter(Boolean);
-        const quotes = await yahooFinance.quote(symbols);
+        if (!symbols.length)
+            return res
+                .status(400)
+                .json({ error: "Query param 'symbols' is required" });
+        const key = `quotes:${[...symbols].sort().join(",")}`;
+        const quotes = await cached(key, TTL.quote, () =>
+            yahooFinance.quote(symbols),
+        );
         const list = Array.isArray(quotes) ? quotes : [quotes];
         res.json(list.filter(Boolean).map(shapeQuote));
-    } catch (err) {
-        res.status(502).json({
-            error: "Failed to fetch stock data",
-            details: err.message,
-        });
+    } catch (error) {
+        errorResponse(res, "Failed to fetch stock data", error);
     }
 });
 
-// Historical price data
-app.get("/api/stock/:symbol/history", async (req, res) => {
+router.get("/top100", async (req, res) => {
+    try {
+        const criterion = topCriteria[req.query.criterion]
+            ? req.query.criterion
+            : "marketCap";
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const limit = Number.isFinite(requestedLimit)
+            ? Math.min(Math.max(requestedLimit, 1), 100)
+            : 100;
+        // One Yahoo call serves every criterion and limit
+        const quotes = await cached("top100", TTL.top100, () =>
+            yahooFinance.quote(topUniverse),
+        );
+        const direction = topCriteria[criterion].direction === "asc" ? 1 : -1;
+        const ranked = (Array.isArray(quotes) ? quotes : [quotes])
+            .filter(Boolean)
+            .map(shapeQuote)
+            .sort((left, right) => {
+                const leftValue = left[criterion];
+                const rightValue = right[criterion];
+                if (leftValue === null || leftValue === undefined) return 1;
+                if (rightValue === null || rightValue === undefined) return -1;
+                return (leftValue - rightValue) * direction;
+            })
+            .slice(0, limit)
+            .map((quote, index) => ({ rank: index + 1, ...quote }));
+        res.json({
+            criterion,
+            label: topCriteria[criterion].label,
+            count: ranked.length,
+            stocks: ranked,
+        });
+    } catch (error) {
+        errorResponse(res, "Failed to fetch top stocks", error);
+    }
+});
+
+router.get("/stock/:symbol/history", async (req, res) => {
     try {
         const symbol = req.params.symbol.toUpperCase();
         const range = req.query.range || "1mo";
-        const interval = req.query.interval || "1d"; // 1d, 1wk, 1mo
-
-        const period1 = parseRangeToPeriod1(range);
-        const period2 = new Date();
-
-        const result = await yahooFinance.chart(symbol, {
-            period1,
-            period2,
-            interval,
-        });
-
-        const quotes = (result.quotes || []).map((q) => ({
-            date: q.date,
-            open: q.open,
-            high: q.high,
-            low: q.low,
-            close: q.close,
-            volume: q.volume,
+        const interval = req.query.interval || "1d";
+        const result = await cached(
+            `history:${symbol}:${range}:${interval}`,
+            TTL.history,
+            () =>
+                yahooFinance.chart(symbol, {
+                    period1: periodFromRange(range),
+                    period2: new Date(),
+                    interval,
+                }),
+        );
+        const quotes = (result.quotes || []).map((quote) => ({
+            date: quote.date,
+            open: quote.open,
+            high: quote.high,
+            low: quote.low,
+            close: quote.close,
+            volume: quote.volume,
         }));
-
         res.json({ symbol, range, interval, points: quotes.length, quotes });
-    } catch (err) {
-        res.status(502).json({
-            error: "Failed to fetch historical data",
-            details: err.message,
-        });
+    } catch (error) {
+        errorResponse(res, "Failed to fetch historical data", error);
     }
 });
 
-// Extended fundamentals (P/E, margins, growth, analyst targets, etc.)
-app.get("/api/stock/:symbol/summary", async (req, res) => {
+router.get("/stock/:symbol/summary", async (req, res) => {
     try {
-        const symbol = req.params.symbol.toUpperCase();
         const modules = [
             "summaryDetail",
             "defaultKeyStatistics",
@@ -194,35 +321,66 @@ app.get("/api/stock/:symbol/summary", async (req, res) => {
             "price",
             "assetProfile",
         ];
-        const result = await yahooFinance.quoteSummary(symbol, { modules });
-        res.json(result);
-    } catch (err) {
-        res.status(502).json({
-            error: "Failed to fetch summary data",
-            details: err.message,
-        });
+        const symbol = req.params.symbol.toUpperCase();
+        res.json(
+            await cached(`summary:${symbol}`, TTL.summary, () =>
+                yahooFinance.quoteSummary(symbol, { modules }),
+            ),
+        );
+    } catch (error) {
+        errorResponse(res, "Failed to fetch summary data", error);
     }
 });
 
-// Symbol search
-app.get("/api/search", async (req, res) => {
+router.get("/search", async (req, res) => {
     try {
-        const q = req.query.q;
-        if (!q)
+        const query = String(req.query.q || "").trim();
+        if (!query)
             return res
                 .status(400)
-                .json({ error: "Query param 'q' is required, e.g. ?q=apple" });
-        const result = await yahooFinance.search(q);
-        const matches = (result.quotes || [])
-            .filter((r) => r.symbol)
-            .map((r) => ({
-                symbol: r.symbol,
-                name: r.shortname || r.longname,
-                exchange: r.exchange,
-                type: r.quoteType,
-            }));
-        res.json(matches);
-    } catch (err) {
-        res.status(502).json({ error: "Search failed", details: err.message });
+                .json({ error: "Query param 'q' is required" });
+        const result = await cached(
+            `search:${query.toLowerCase()}`,
+            TTL.search,
+            () => yahooFinance.search(query),
+        );
+        res.json(
+            (result.quotes || [])
+                .filter((quote) => quote.symbol)
+                .map((quote) => ({
+                    symbol: quote.symbol,
+                    name: quote.shortname || quote.longname || quote.symbol,
+                    exchange: quote.exchange,
+                    type: quote.quoteType,
+                })),
+        );
+    } catch (error) {
+        errorResponse(res, "Search failed", error);
     }
 });
+
+router.get("/btc-history", async (_req, res) => {
+    try {
+        const result = await cached("btc-history", TTL.btcHistory, () =>
+            yahooFinance.chart("BTC-USD", {
+                period1: "2014-09-17",
+                period2: new Date(),
+                interval: "1d",
+            }),
+        );
+        res.json(
+            (result.quotes || []).map((quote) => ({
+                date: new Date(quote.date).toISOString().split("T")[0],
+                open: quote.open,
+                high: quote.high,
+                low: quote.low,
+                close: quote.close,
+                volume: quote.volume,
+            })),
+        );
+    } catch (error) {
+        errorResponse(res, "Failed to fetch Bitcoin history", error);
+    }
+});
+
+module.exports = router;
