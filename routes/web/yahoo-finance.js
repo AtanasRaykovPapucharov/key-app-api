@@ -137,18 +137,25 @@ function errorResponse(res, message, error, status = 502) {
 // symbol at a time (~2 min for a refresh). Users always get the latest
 // list immediately; it is refreshed every 30 minutes in the background.
 const TOP_REFRESH_MS = 30 * 60 * 1000;
-const top = { stocks: new Map(), refreshing: false, lastRun: 0 };
+const TOP_RETRY_MS = 60 * 1000; // retry sooner if the last refresh failed
+const top = { stocks: new Map(), refreshing: false, lastRun: 0, lastError: null, failed: 0 };
 
 async function refreshTop() {
     if (top.refreshing) return;
     top.refreshing = true;
+    top.lastError = null;
+    top.failed = 0;
     try {
         for (const symbol of topUniverse) {
             try {
                 const quote = await finnhub.getQuote(symbol, { priority: false });
                 if (quote) top.stocks.set(symbol, quote);
             } catch (error) {
+                top.failed += 1;
+                top.lastError = error.message;
                 console.error(`[top100] ${symbol}: ${error.message}`);
+                // missing/invalid key: no point trying the other 100 symbols
+                if (/FINNHUB_API_KEY/.test(error.message)) break;
             }
         }
     } finally {
@@ -158,7 +165,8 @@ async function refreshTop() {
 }
 
 function refreshTopIfStale() {
-    if (!top.refreshing && Date.now() - top.lastRun > TOP_REFRESH_MS) {
+    const wait = top.stocks.size === 0 || top.lastError ? TOP_RETRY_MS : TOP_REFRESH_MS;
+    if (!top.refreshing && Date.now() - top.lastRun > wait) {
         refreshTop().catch((error) => console.error("[top100]", error.message));
     }
 }
@@ -250,6 +258,8 @@ router.get("/top100", (req, res) => {
         loading: top.refreshing,
         loaded: top.stocks.size,
         total: topUniverse.length,
+        // shows why the list is empty or incomplete (e.g. missing API key)
+        lastError: top.lastError,
     });
 });
 
