@@ -238,10 +238,29 @@ async function remove(id, uid) {
 }
 
 // Evaluates every enabled rule against the live price and places orders when triggered
+let missingTableWarned = false;
+
 async function evaluateAndExecuteAll() {
-    const { rows } = await pool.query(
-        `SELECT * FROM public.auto_trading_rules WHERE enabled = true`,
-    );
+    let rows;
+    try {
+        ({ rows } = await pool.query(
+            `SELECT * FROM public.auto_trading_rules WHERE enabled = true`,
+        ));
+    } catch (err) {
+        // Table not created yet: warn once instead of an error every minute
+        if (err.code === "42P01") {
+            if (!missingTableWarned) {
+                logger.warn(
+                    "Auto-trading is paused: table public.auto_trading_rules does not exist in this database. " +
+                        "Run `npm run migrate` (or restart the server) to create it.",
+                );
+                missingTableWarned = true;
+            }
+            return;
+        }
+        throw err;
+    }
+    missingTableWarned = false;
 
     for (const raw of rows) {
         const rule = normalizeRow(raw);

@@ -57,7 +57,7 @@ async function check(name, fn) {
     const linkToken = (mail) => new URL(mail.text.match(/https:\/\/app\.example\S+/)[0]).searchParams.get("token");
 
     await check("migration applies once and is then up to date", async () => {
-        assert.deepEqual(applied, ["001_email_auth.sql"]);
+        assert.deepEqual(applied, ["001_email_auth.sql", "002_auto_trading_rules.sql"]);
         assert.deepEqual(again, []);
     });
 
