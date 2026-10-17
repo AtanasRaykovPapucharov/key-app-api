@@ -27,7 +27,8 @@ router.get("/order/:cryptoId", async (req, res) => {
 
 router.post("/order", async (req, res) => {
     try {
-        const respData = await create(req.body);
+        // The order always belongs to the logged-in user, whatever the body says
+        const respData = await create({ ...req.body, uid: req.auth.uid });
         res.status(200).json({
             message: "Order created successfully",
             data: respData,
@@ -46,7 +47,9 @@ router.delete("/order", async (req, res) => {
                 error: "order id is required",
             });
 
-        const respData = await remove(id);
+        const respData = await remove(id, req.auth.uid);
+        if (!respData)
+            return res.status(404).json({ error: "Order not found" });
         res.status(200).json({
             message: "Order deleted successfully",
             data: respData,
@@ -58,7 +61,8 @@ router.delete("/order", async (req, res) => {
 
 router.post("/order", async (req, res) => {
     try {
-        const respData = await create(req.body);
+        // The order always belongs to the logged-in user, whatever the body says
+        const respData = await create({ ...req.body, uid: req.auth.uid });
         res.status(200).json({
             message: "Order created successfully",
             data: respData,
@@ -70,20 +74,8 @@ router.post("/order", async (req, res) => {
 
 //===========================================================
 
-router.post("/buy", async (req, res) => {
-    try {
-        console.log(req);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-router.post("/sell", async (req, res) => {
-    try {
-        console.log(req);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
+// Not implemented yet: answer instead of logging the request and hanging
+router.post("/buy", (req, res) => res.status(501).json({ error: "Not implemented" }));
+router.post("/sell", (req, res) => res.status(501).json({ error: "Not implemented" }));
 
 module.exports = router;

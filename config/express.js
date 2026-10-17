@@ -13,11 +13,40 @@ module.exports = (express, app) => {
     const router = require("../routes");
 
     const isProd = process.env.NODE_ENV === "production";
+    const { authenticate } = require("./auth.js");
+
+    // Behind a hosting proxy (Render, Railway, Fly, Heroku, Nginx…) Express must
+    // trust it, otherwise every visitor shares the proxy's IP: the login rate
+    // limit then blocks EVERYONE after 20 attempts, and secure cookies break.
+    // TRUST_PROXY = number of proxy hops (usually 1).
+    if (process.env.TRUST_PROXY) {
+        const hops = Number(process.env.TRUST_PROXY);
+        app.set(
+            "trust proxy",
+            Number.isNaN(hops) ? process.env.TRUST_PROXY : hops,
+        );
+    }
+
+    // CORS_ORIGIN may list several origins separated by commas
+    const allowedOrigins = process.env.CORS_ORIGIN || "http://localhost:9000";
 
     app.use(helmet());
     app.use(pinoHttp({ logger }));
-    app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
-    app.use(express.json());
+    app.use(
+        cors({
+            origin: (origin, callback) =>
+                callback(null, !origin || allowedOrigins === origin),
+            credentials: true,
+            allowedHeaders: [
+                "Content-Type",
+                "Authorization",
+                "x-auth-token",
+                "x-uid",
+                "x-watched",
+            ],
+        }),
+    );
+    app.use(express.json({ limit: "1mb" }));
     app.use(express.urlencoded({ extended: true }));
     app.use(hpp());
 
@@ -42,7 +71,7 @@ module.exports = (express, app) => {
                 status_code: res.statusCode,
                 response_time_ms: responseTimeMs,
                 ip: req.ip,
-                user_id: req.user?.id ?? null,
+                user_id: req.auth?.id ?? req.user?.id ?? null,
             }).catch((err) => logger.error({ err }, "Failed to persist log"));
         });
         next();
@@ -76,6 +105,9 @@ module.exports = (express, app) => {
     app.use(passport.initialize());
     app.use(passport.session());
     configurePassport();
+
+    // Verify the token on every request; sets req.auth and a trusted x-uid
+    app.use("/api", authenticate);
 
     app.use("/api/register", authLimiter);
     app.use("/api/login", authLimiter);

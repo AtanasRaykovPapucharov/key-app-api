@@ -3,6 +3,10 @@ const bcrypt = require("bcrypt");
 const passport = require("passport");
 const { pool } = require("../../services/db.js");
 const { v4 } = require("uuid");
+const { publicUser, signToken } = require("../../config/auth.js");
+
+const USERNAME_MIN = 3;
+const PASSWORD_MIN = 8;
 
 const router = express.Router();
 
@@ -11,12 +15,14 @@ router.post("/register", async (req, res, next) => {
     const client = await pool.connect();
 
     try {
-        const username = req.body.username?.trim();
-        const { password } = req.body;
-        if (!username || !password)
-            return res
-                .status(400)
-                .json({ message: "Username and password required" });
+        const username = String(req.body.username ?? "").trim();
+        const password = String(req.body.password ?? "");
+        if (username.length < USERNAME_MIN || password.length < PASSWORD_MIN)
+            return res.status(400).json({
+                message: `Username needs at least ${USERNAME_MIN} characters and password at least ${PASSWORD_MIN}.`,
+            });
+        if (username.length > 50 || password.length > 200)
+            return res.status(400).json({ message: "Username or password is too long." });
 
         await client.query("BEGIN");
 
@@ -29,7 +35,7 @@ router.post("/register", async (req, res, next) => {
             return res.status(409).json({ message: "Username already taken" });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 12);
         const result = await client.query(
             "INSERT INTO users (username, password, uid) VALUES ($1, $2, $3) RETURNING *",
             [username, hashedPassword, v4()],
@@ -61,22 +67,18 @@ router.post("/register", async (req, res, next) => {
 
         req.login(user, (err) => {
             if (err) return next(err);
-            return res.json({
+            return res.status(201).json({
                 message: "User registered and logged in",
-                user: {
-                    id: user.userid,
-                    username: user.username,
-                    admin: user.admin,
-                    avatar: user.avatar,
-                    uid: user.uid,
-                },
+                user: publicUser(user),
+                token: signToken(user),
             });
         });
     } catch (err) {
         await client.query("ROLLBACK").catch(() => {});
         if (err.code === "23505")
             return res.status(409).json({ message: "Username already taken" });
-        res.status(500).json({ message: "Server error", error: err.message });
+        console.error("[register]", err);
+        res.status(500).json({ message: "Server error" });
     } finally {
         client.release();
     }
@@ -86,19 +88,18 @@ router.post("/register", async (req, res, next) => {
 router.post("/login", (req, res, next) => {
     passport.authenticate("local", (err, user, info) => {
         if (err) return next(err);
-        if (!user) return res.status(401).json({ message: info.message });
+        // Same message for unknown user and wrong password (no account probing)
+        if (!user)
+            return res
+                .status(401)
+                .json({ message: info?.message || "Incorrect username or password." });
 
         req.login(user, (err) => {
             if (err) return next(err);
             return res.json({
                 message: "Login successful",
-                user: {
-                    id: user.userid,
-                    username: user.username,
-                    admin: user.admin,
-                    avatar: user.avatar,
-                    uid: user.uid,
-                },
+                user: publicUser(user),
+                token: signToken(user),
             });
         });
     })(req, res, next);

@@ -15,6 +15,8 @@ initWebSocket(server);
 // Check auto-trading rules against live prices every minute
 schedule("*/1 * * * *", evaluateAndExecuteAll);
 
-server.listen(3000, () => {
-    console.log("Dashboard at http://localhost:3000");
+// Hosting providers assign the port through PORT
+const PORT = Number(process.env.PORT) || 3000;
+server.listen(PORT, () => {
+    console.log(`API listening on port ${PORT}`);
 });

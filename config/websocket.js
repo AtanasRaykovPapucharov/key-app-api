@@ -2,6 +2,9 @@ const { WebSocketServer } = require("ws");
 const pool = require("./neon");
 const { startStreams, WS_WINDOWS } = require("../services/ws/streams");
 const { startPoller, POLL_INTERVALS } = require("../services/ws/poller");
+const { verifyToken } = require("./auth");
+
+const LEGACY_UID_AUTH = process.env.LEGACY_UID_AUTH === "true";
 
 const WINDOW_SIZE = process.env.WINDOW_SIZE || "24h";
 const PAIRS = [
@@ -47,13 +50,24 @@ function initWebSocket(server) {
                 return;
             }
 
-            // Expect: { type: "auth", userId: "123" }
-            // Adapt this to your actual auth mechanism (JWT, session cookie, etc.)
-            if (msg.type === "auth" && msg.userId) {
-                await handleAuth(ws, msg.userId);
-            } else {
-                await handleAuth(ws);
+            // Expect: { type: "auth", token, userId }. The user comes from the
+            // verified token; a bare userId is only honoured in legacy mode.
+            if (msg.type !== "auth") return;
+            let userId = null;
+            if (msg.token) {
+                try {
+                    userId = verifyToken(msg.token).id;
+                } catch {
+                    userId = null; // invalid/expired → public tickers only
+                }
+            } else if (LEGACY_UID_AUTH && msg.userId) {
+                userId = msg.userId;
             }
+
+            // Re-auth replaces the previous stream instead of leaking it
+            activeSessions.get(ws)?.stop?.();
+            activeSessions.delete(ws);
+            await handleAuth(ws, userId);
         });
 
         ws.on("close", () => {
@@ -69,8 +83,6 @@ function initWebSocket(server) {
 
 async function handleAuth(ws, userId = null) {
     try {
-        console.log("userId: ", userId);
-
         let pairs = PAIRS;
         if (userId) {
             const res = await pool.query(

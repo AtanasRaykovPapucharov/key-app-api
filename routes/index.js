@@ -1,4 +1,5 @@
 const express = require("express");
+const { requireAuth, requireAdmin } = require("../config/auth.js");
 
 const { getAllTables } = require("../services/db.js");
 const coinmarketcapRoutes = require("./web/coinmarketcap.js");
@@ -23,30 +24,36 @@ const autoTradingRoutes = require("./app/autoTrading.js");
 
 const router = express.Router();
 
-// Mount each race under /api
-router.use(authRoutes);
+// ── Public ──────────────────────────────────────────────────────────────
+router.use(authRoutes); // /login, /register, /logout
 router.use("/yahoo", yahooRoutes);
 router.use("/coinmarketcap", coinmarketcapRoutes);
 router.use("/coingecko", coingeckoRoutes);
 router.use("/price-history", priceHistoryRoutes);
-router.use("/admin", adminRoutes);
-router.use("/user", userRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/crypto", cryptoRoutes);
-router.use("/crypto-analysis", cryptoAnalysisRoutes);
-router.use("/stocks-analysis", stocksAnalysisRoutes);
-router.use("/bank", bankRoutes);
 router.use("/daily", dailyRoutes);
-router.use("/trader", traderRoutes);
-router.use("/portfolio", portfolioRoutes);
-router.use("/music-note-sheet", musicNoteSheetRoutes);
-router.use("/scheduler", schedulerRoutes);
-router.use("/auto-trading", autoTradingRoutes);
+// mixed public / logged-in handlers: guarded inside the router
+router.use("/bank", bankRoutes);
+router.use("/crypto-analysis", cryptoAnalysisRoutes);
+
+// ── Logged-in users (x-uid comes from the verified token) ────────────────
+router.use("/user", requireAuth, userRoutes);
+router.use("/stocks-analysis", requireAuth, stocksAnalysisRoutes);
+router.use("/trader", requireAuth, traderRoutes);
+router.use("/portfolio", requireAuth, portfolioRoutes);
+router.use("/music-note-sheet", requireAuth, musicNoteSheetRoutes);
+router.use("/scheduler", requireAuth, schedulerRoutes);
+router.use("/auto-trading", requireAuth, autoTradingRoutes);
+
+// ── Admins only ──────────────────────────────────────────────────────────
+router.use("/admin", requireAdmin, adminRoutes);
 
 getAllTables()
     .then((tables) => {
         for (const name of tables) {
-            if (name !== "users") router.use(`/${name}`, tbl(name));
+            if (name !== "users")
+                router.use(`/${name}`, requireAdmin, tbl(name));
         }
     })
     .catch((err) => {

@@ -30,24 +30,25 @@ module.exports = (tblName) => {
 
     router.post("/", async (req, res) => {
         try {
-            const { tableName, row } = req.body;
-            if (!tableName)
-                return res.status(400).send("tableName is required");
+            // The table comes from the route, never from the request body
+            const tableName = tblName;
+            const { row } = req.body;
             if (!row) return res.status(400).send("row is required");
 
             const filteredRow = Object.fromEntries(
                 Object.entries(row).filter(([key]) => key !== `${tableName}id`),
             );
-            const props = Object.keys(filteredRow).join(", ");
-            const placeholders = Object.keys(filteredRow)
-                .map((_, i) => `$${i + 1}`)
-                .join(", ");
+            const columns = Object.keys(filteredRow);
+            if (!columns.length)
+                return res.status(400).send("row has no columns");
+            const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
             const values = Object.values(filteredRow);
 
+            // %I with an array → "col1","col2" ; placeholders are inserted raw
             const query = format(
-                "INSERT INTO %I (%I) VALUES (%I) RETURNING *",
+                "INSERT INTO %I (%I) VALUES (%s) RETURNING *",
                 tableName,
-                props,
+                columns,
                 placeholders,
             );
 
@@ -55,7 +56,7 @@ module.exports = (tblName) => {
             res.status(201).json(result.rows[0]);
         } catch (err) {
             console.error(err);
-            res.status(500).send("Error posting row: " + err);
+            res.status(500).send("Error posting row");
         }
     });
 

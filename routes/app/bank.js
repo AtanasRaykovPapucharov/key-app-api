@@ -1,6 +1,7 @@
 const express = require("express");
 const { pool } = require("../../services/db.js");
 const { getAll } = require("../../services/app/bankTransaction");
+const { requireAuth } = require("../../config/auth.js");
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get("/", async (req, res) => {
     }
 });
 
-router.get("/transactions", async (req, res) => {
+router.get("/transactions", requireAuth, async (req, res) => {
     try {
         const uid = req.headers["x-uid"];
         if (!uid)
@@ -24,7 +25,8 @@ router.get("/transactions", async (req, res) => {
         const rows = await getAll(uid);
         res.status(200).json(rows);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("[bank:transactions]", err);
+        res.status(500).json({ error: "Server error" });
     }
 });
 

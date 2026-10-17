@@ -8,21 +8,16 @@ module.exports = function configurePassport() {
         new Strategy(async (username, password, done) => {
             try {
                 const result = await pool.query(
-                    "SELECT userid, username, password, admin, avatar, uid FROM users WHERE username = $1",
+                    "SELECT userid, username, password, admin, avatar, uid FROM users WHERE username = $1 AND deleted = FALSE",
                     [username],
                 );
                 const user = result.rows[0];
 
-                if (!user)
-                    return done(null, false, {
-                        message: "Incorrect username.",
-                    });
+                const generic = { message: "Incorrect username or password." };
+                if (!user) return done(null, false, generic);
 
                 const match = await bcrypt.compare(password, user.password);
-                if (!match)
-                    return done(null, false, {
-                        message: "Incorrect password.",
-                    });
+                if (!match) return done(null, false, generic);
 
                 return done(null, user);
             } catch (err) {

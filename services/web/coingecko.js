@@ -1,7 +1,6 @@
 const axios = require("axios");
 
-const BASE_URL =
-    process.env.COINGECKO_URL || "https://api.coingecko.com/api/v3";
+const BASE_URL = process.env.COINGECKO_URL;
 const API_KEY = process.env.COINGECKO_API_KEY || null;
 
 // CoinGecko's free tier allows ~10-30 calls/min, so responses are cached.
@@ -24,7 +23,7 @@ const ALLOWED_DAYS = new Set([
 // CoinGecko's free tier only serves the last 365 days, so longer ranges come
 // from Binance's keyless klines endpoint instead.
 const FREE_HISTORY_DAYS = 365;
-const BINANCE_URL = process.env.BINANCE_URL || "https://api.binance.com/api/v3";
+const BINANCE_URL = process.env.BINANCE_URL;
 const COIN_SYMBOLS = {
     bitcoin: "BTC",
     ethereum: "ETH",

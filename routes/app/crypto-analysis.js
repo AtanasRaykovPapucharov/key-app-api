@@ -4,6 +4,7 @@ const {
     upsert,
     removeByCryptoId,
 } = require("../../services/app/cryptoAnalysis");
+const { requireAuth } = require("../../config/auth.js");
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.get("/", async (req, res) => {
     }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
     try {
         const uid = req.headers["x-uid"];
         const { crypto_id, project_name, project_year, total_points, test } =
@@ -43,15 +44,20 @@ router.post("/", async (req, res) => {
             total_points,
             test,
             uid,
+            admin: req.auth.admin,
         });
+        if (!row)
+            return res.status(403).json({
+                error: "This analysis belongs to another user.",
+            });
         res.status(200).json(row);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
+        console.error("[crypto-analysis:upsert]", err);
+        res.status(500).json({ error: "Server error" });
     }
 });
 
-router.delete("/:crypto_id", async (req, res) => {
+router.delete("/:crypto_id", requireAuth, async (req, res) => {
     try {
         const cryptoId = req.params.crypto_id?.trim().toLowerCase();
         if (!cryptoId)
@@ -59,8 +65,15 @@ router.delete("/:crypto_id", async (req, res) => {
                 error: "crypto_id is required",
             });
 
-        const row = await removeByCryptoId(cryptoId);
-        if (!row) return res.status(404).json({ error: "Analysis not found" });
+        // Only the author of the analysis (or an admin) may delete it
+        const row = await removeByCryptoId(cryptoId, {
+            uid: req.auth.uid,
+            admin: req.auth.admin,
+        });
+        if (!row)
+            return res
+                .status(404)
+                .json({ error: "Analysis not found or not yours" });
 
         res.status(200).json(row);
     } catch (err) {

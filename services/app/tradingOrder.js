@@ -318,10 +318,10 @@ async function update(
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
 
-async function remove(id) {
+async function remove(id, uid) {
     const { rows } = await pool.query(
-        "DELETE FROM public.trading_order WHERE id = $1 RETURNING *",
-        [id],
+        "DELETE FROM public.trading_order WHERE id = $1 AND uid = $2::uuid RETURNING *",
+        [id, uid],
     );
     return rows[0] ?? null;
 }
