@@ -6,13 +6,14 @@ process.env.JWT_SECRET = "test-secret-".padEnd(64, "x");
 process.env.SESSION_SECRET_KEY = "test-session";
 process.env.CORS_ORIGIN = "https://keyappui.vercel.app";
 process.env.NODE_ENV = "test";
+process.env.MAIL_CAPTURE = "true";
 process.env.LOG_LEVEL = "silent";
 
 const path = require("path");
 const assert = require("assert");
 const bcrypt = require("bcrypt");
 
-// ── in-memory fake of config/neon.js ─────────────────────────────────────
+// ── in-memory fake of config/pool.js ─────────────────────────────────────
 const db = {
     users: [
         { userid: 1, uid: "11111111-1111-4111-8111-111111111111", username: "alice", password: bcrypt.hashSync("alicepass1", 4), admin: false, avatar: null, deleted: false },
@@ -34,7 +35,11 @@ const fakePool = {
         const q = sql.replace(/\s+/g, " ");
         if (/information_schema\.tables/.test(q)) return rows(["users", "portfolio", "trading_order", "bank"].map((table_name) => ({ table_name })));
         if (/INSERT INTO public\.logs|INSERT INTO logs/i.test(q)) return rows([]);
+        if (/FROM users WHERE deleted = FALSE AND \(username = \$1 OR lower\(email\)/.test(q))
+            return rows(db.users.filter((u) => !u.deleted && (u.username === p[0] || (u.email || "").toLowerCase() === String(p[0]).toLowerCase())));
+        if (/FROM users WHERE lower\(email\) = \$1 AND deleted = FALSE AND/.test(q)) return rows(db.users.filter((u) => !u.deleted && (u.email || "") === p[0] && u.userid !== p[1]));
         if (/FROM users WHERE username = \$1/.test(q)) return rows(db.users.filter((u) => u.username === p[0] && !u.deleted));
+        if (/INSERT INTO auth_tokens|UPDATE auth_tokens/.test(q)) return rows([]);
         if (/FROM users WHERE userid = \$1 AND deleted = FALSE/.test(q)) return rows(db.users.filter((u) => u.userid === Number(p[0]) && !u.deleted));
         if (/FROM users WHERE uid = \$1::uuid AND deleted = FALSE/.test(q)) return rows(db.users.filter((u) => u.uid === p[0] && !u.deleted));
         if (/SELECT .* FROM users ORDER BY userid/.test(q)) return rows(db.users.map(({ password, ...u }) => u));
@@ -52,7 +57,7 @@ const fakePool = {
         if (/^(BEGIN|COMMIT|ROLLBACK)/.test(q.trim())) return rows([]);
         if (/SELECT 1 FROM users WHERE username/.test(q)) return rows(db.users.filter((u) => u.username === p[0]));
         if (/INSERT INTO users/.test(q)) {
-            const u = { userid: db.users.length + 1, username: p[0], password: p[1], uid: p[2], admin: false, avatar: null, deleted: false };
+            const u = { userid: db.users.length + 1, username: p[0], password: p[1], uid: p[2], email: p[3], locale: p[4], admin: false, avatar: null, deleted: false, token_version: 0 };
             db.users.push(u);
             return rows([u]);
         }
@@ -64,8 +69,8 @@ const fakePool = {
         return { query: fakePool.query, release() {} };
     },
 };
-const neonPath = path.resolve(__dirname, "../config/neon.js");
-require.cache[neonPath] = { id: neonPath, filename: neonPath, loaded: true, exports: fakePool };
+const poolPath = path.resolve(__dirname, "../config/pool.js");
+require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: fakePool };
 
 // ── start the real app ───────────────────────────────────────────────────
 const express = require("express");
@@ -163,14 +168,14 @@ async function check(name, fn) {
         assert.equal((await call("GET", "/bank")).status, 200);
     });
     await check("register: short password rejected, valid one returns token", async () => {
-        assert.equal((await call("POST", "/register", { body: { username: "carol", password: "123" } })).status, 400);
-        const r = await call("POST", "/register", { body: { username: "carol", password: "carolpass1" } });
+        assert.equal((await call("POST", "/register", { body: { username: "carol", email: "carol@example.com", password: "123" } })).status, 400);
+        const r = await call("POST", "/register", { body: { username: "carol", email: "carol@example.com", password: "carolpass1" } });
         assert.equal(r.status, 201);
         assert.ok(r.data.token);
         assert.equal((await call("GET", "/portfolio", { token: r.data.token })).status, 200);
     });
     await check("duplicate username → 409", async () => {
-        assert.equal((await call("POST", "/register", { body: { username: "alice", password: "whatever12" } })).status, 409);
+        assert.equal((await call("POST", "/register", { body: { username: "alice", email: "alice2@example.com", password: "whatever12" } })).status, 409);
     });
     await check("deleting your account invalidates your token immediately", async () => {
         const bob = await call("POST", "/login", { body: { username: "bob", password: "bobpass123" } });

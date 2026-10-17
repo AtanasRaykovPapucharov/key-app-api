@@ -14,7 +14,7 @@
  * can act as that user) — enable it only while old clients are still deployed.
  */
 const jwt = require("jsonwebtoken");
-const pool = require("./neon");
+const pool = require("./pool");
 
 const SECRET = process.env.JWT_SECRET;
 const TOKEN_TTL = process.env.JWT_TTL || "7d";
@@ -41,13 +41,17 @@ function publicUser(u) {
         id: u.userid,
         uid: u.uid,
         username: u.username,
+        email: u.email ?? null,
+        emailVerified: !!u.email_verified,
         admin: !!u.admin,
         avatar: u.avatar ?? null,
+        locale: u.locale ?? "en",
     };
 }
 
+// `tv` (token version) lets a password change revoke every older token
 function signToken(u) {
-    return jwt.sign({ uid: u.uid, admin: !!u.admin }, SECRET, {
+    return jwt.sign({ uid: u.uid, admin: !!u.admin, tv: u.token_version ?? 0 }, SECRET, {
         subject: String(u.userid),
         expiresIn: TOKEN_TTL,
     });
@@ -55,7 +59,7 @@ function signToken(u) {
 
 function verifyToken(token) {
     const payload = jwt.verify(token, SECRET);
-    return { id: Number(payload.sub), uid: payload.uid, admin: !!payload.admin };
+    return { id: Number(payload.sub), uid: payload.uid, admin: !!payload.admin, tv: payload.tv ?? 0 };
 }
 
 function readToken(req) {
@@ -72,7 +76,7 @@ async function loadUser(id) {
     const hit = userCache.get(id);
     if (hit && Date.now() - hit.at < USER_CACHE_MS) return hit.row;
     const { rows } = await pool.query(
-        "SELECT userid, uid, username, admin FROM users WHERE userid = $1 AND deleted = FALSE",
+        "SELECT userid, uid, username, admin, token_version FROM users WHERE userid = $1 AND deleted = FALSE",
         [id],
     );
     const row = rows[0] || null;
@@ -86,7 +90,7 @@ function forgetUser(id) {
 
 async function loadUserByUid(uid) {
     const { rows } = await pool.query(
-        "SELECT userid, uid, username, admin FROM users WHERE uid = $1::uuid AND deleted = FALSE",
+        "SELECT userid, uid, username, admin, token_version FROM users WHERE uid = $1::uuid AND deleted = FALSE",
         [uid],
     );
     return rows[0] || null;
@@ -105,8 +109,9 @@ async function authenticate(req, res, next) {
             try {
                 const claims = verifyToken(token);
                 row = await loadUser(claims.id);
-                // Token for a deleted user, or uid mismatch → not authenticated
-                if (row && row.uid !== claims.uid) row = null;
+                // Deleted user, uid mismatch, or a token issued before the
+                // last password change → not authenticated
+                if (row && (row.uid !== claims.uid || (row.token_version ?? 0) !== claims.tv)) row = null;
             } catch {
                 row = null; // invalid or expired token
             }

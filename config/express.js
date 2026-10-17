@@ -28,14 +28,18 @@ module.exports = (express, app) => {
     }
 
     // CORS_ORIGIN may list several origins separated by commas
-    const allowedOrigins = process.env.CORS_ORIGIN || "http://localhost:9000";
+    // One site, or several separated by commas
+    const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:9000")
+        .split(",")
+        .map((o) => o.trim().replace(/\/+$/, ""))
+        .filter(Boolean);
 
     app.use(helmet());
     app.use(pinoHttp({ logger }));
     app.use(
         cors({
             origin: (origin, callback) =>
-                callback(null, !origin || allowedOrigins === origin),
+                callback(null, !origin || allowedOrigins.includes(origin)),
             credentials: true,
             allowedHeaders: [
                 "Content-Type",
@@ -83,6 +87,17 @@ module.exports = (express, app) => {
         limit: 20,
         standardHeaders: true,
         legacyHeaders: false,
+        skipSuccessfulRequests: true, // only failed attempts count
+        message: { code: "RATE_LIMITED", message: "Too many attempts. Try again in a few minutes." },
+    });
+
+    // Endpoints that send email: stricter, so they can't be used to spam inboxes
+    const emailLimiter = rateLimit({
+        windowMs: 60 * 60 * 1000,
+        limit: 6,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { code: "RATE_LIMITED", message: "Too many emails requested. Try again later." },
     });
 
     // Broader limit for the rest of the API
@@ -111,7 +126,27 @@ module.exports = (express, app) => {
 
     app.use("/api/register", authLimiter);
     app.use("/api/login", authLimiter);
+    app.use("/api/reset-password", authLimiter);
+    app.use("/api/verify-email", authLimiter);
+    app.use("/api/forgot-password", emailLimiter);
+    app.use("/api/resend-verification", emailLimiter);
+    app.use("/api/resend-verification-public", emailLimiter);
     app.use("/api", apiLimiter, router);
+
+    // Unknown API route → JSON 404 (not an HTML page)
+    app.use("/api", (req, res) => res.status(404).json({ code: "NOT_FOUND", message: "Not found" }));
+
+    // Last-resort error handler: JSON, no stack traces to the client
+    // eslint-disable-next-line no-unused-vars
+    app.use((err, req, res, next) => {
+        const status = err.status || err.statusCode || 500;
+        if (status >= 500) console.error("[error]", req.method, req.originalUrl, err);
+        if (res.headersSent) return;
+        res.status(status).json({
+            code: status === 400 && err.type === "entity.parse.failed" ? "BAD_JSON" : status >= 500 ? "SERVER_ERROR" : "BAD_REQUEST",
+            message: status >= 500 ? "Server error" : err.expose ? err.message : "Bad request",
+        });
+    });
 
     // // ----------- FRONTEND -----------
     // app.use(express.static(path.join(__dirname, "frontend/dist/spa")));

@@ -1,3 +1,4 @@
+const { sendError } = require("../../services/errors");
 const express = require("express");
 const { getAll, upsert } = require("../../services/app/stocksAnalysis");
 
@@ -39,7 +40,7 @@ router.post("/", async (req, res) => {
         res.status(200).json(row);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: err.message });
+        sendError(res, err, "stocks-analysis");
     }
 });
 

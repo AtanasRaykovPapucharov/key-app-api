@@ -1,3 +1,4 @@
+const { sendError } = require("../../services/errors");
 const express = require("express");
 const { pool } = require("../../services/db.js");
 
@@ -33,7 +34,7 @@ router.get("/", async (req, res) => {
         );
         res.status(200).json(result.rows[0] || {});
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "portfolio");
     }
 });
 
@@ -52,7 +53,7 @@ router.put("/", async (req, res) => {
         );
         res.status(200).json(result.rows[0] || {});
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "portfolio");
     }
 });
 
@@ -89,7 +90,7 @@ router.post("/game", async (req, res) => {
         );
         res.status(201).json(inserted.rows[0]);
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "portfolio");
     }
 });
 

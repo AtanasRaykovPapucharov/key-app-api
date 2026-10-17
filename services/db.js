@@ -1,6 +1,5 @@
 const format = require("pg-format");
-const pool = require("../config/neon.js");
-// const pool = require("../config/postgre.js");
+const pool = require("../config/pool.js");
 
 async function getAllTables() {
     const query = `SELECT table_name

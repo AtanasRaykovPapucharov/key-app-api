@@ -5,7 +5,7 @@ const { requireAdmin, forgetUser } = require("../../config/auth.js");
 const router = express.Router();
 
 // Never select the password hash
-const SAFE_COLUMNS = "userid, uid, username, admin, avatar, deleted";
+const SAFE_COLUMNS = "userid, uid, username, email, email_verified, admin, avatar, deleted";
 
 // List all users — admins only
 router.get("/", requireAdmin, async (req, res) => {

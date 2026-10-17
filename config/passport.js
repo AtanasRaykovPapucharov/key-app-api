@@ -1,24 +1,18 @@
 const passport = require("passport");
 const { Strategy } = require("passport-local");
-const bcrypt = require("bcrypt");
+const { findForLogin, checkPassword } = require("../services/auth/accounts.js");
 const { pool } = require("../services/db.js");
 
 module.exports = function configurePassport() {
     passport.use(
-        new Strategy(async (username, password, done) => {
+        // "username" may be a username or an email address
+        new Strategy(async (identifier, password, done) => {
             try {
-                const result = await pool.query(
-                    "SELECT userid, username, password, admin, avatar, uid FROM users WHERE username = $1 AND deleted = FALSE",
-                    [username],
-                );
-                const user = result.rows[0];
-
-                const generic = { message: "Incorrect username or password." };
-                if (!user) return done(null, false, generic);
-
-                const match = await bcrypt.compare(password, user.password);
-                if (!match) return done(null, false, generic);
-
+                const user = await findForLogin(identifier);
+                // checkPassword runs bcrypt even for unknown users (constant timing)
+                if (!(await checkPassword(user, password)))
+                    return done(null, false, { message: "Incorrect username or password." });
+                delete user.password;
                 return done(null, user);
             } catch (err) {
                 return done(err);

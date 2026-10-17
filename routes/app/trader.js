@@ -1,4 +1,6 @@
+const { sendError } = require("../../services/errors");
 const express = require("express");
+const { prepareOrder } = require("../../services/app/orderInput");
 const {
     getByCryptoId,
     create,
@@ -21,20 +23,21 @@ router.get("/order/:cryptoId", async (req, res) => {
         const orders = await getByCryptoId(cryptoId, uid, isTrading);
         res.status(200).json(orders);
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "trader");
     }
 });
 
 router.post("/order", async (req, res) => {
     try {
-        // The order always belongs to the logged-in user, whatever the body says
-        const respData = await create({ ...req.body, uid: req.auth.uid });
+        // Validated input, server-side price, and always the logged-in user's order
+        const order = await prepareOrder(req.body);
+        const respData = await create({ ...order, uid: req.auth.uid });
         res.status(200).json({
             message: "Order created successfully",
             data: respData,
         });
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "trader");
     }
 });
 
@@ -55,20 +58,7 @@ router.delete("/order", async (req, res) => {
             data: respData,
         });
     } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-router.post("/order", async (req, res) => {
-    try {
-        // The order always belongs to the logged-in user, whatever the body says
-        const respData = await create({ ...req.body, uid: req.auth.uid });
-        res.status(200).json({
-            message: "Order created successfully",
-            data: respData,
-        });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
+        sendError(res, e, "trader");
     }
 });
 

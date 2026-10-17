@@ -1,5 +1,5 @@
 const { WebSocketServer } = require("ws");
-const pool = require("./neon");
+const pool = require("./pool");
 const { startStreams, WS_WINDOWS } = require("../services/ws/streams");
 const { startPoller, POLL_INTERVALS } = require("../services/ws/poller");
 const { verifyToken } = require("./auth");

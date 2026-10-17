@@ -5,7 +5,8 @@
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "test": "node test/security-smoke.js"
+        "test": "node test/security-smoke.js && node test/order-input.test.js && node test/email-auth.test.js",
+        "migrate": "node config/migrate.js"
     },
     "dependencies": {
         "@binance/connector": "^3.6.1",
@@ -23,6 +24,7 @@
         "hpp": "^0.2.3",
         "jsonwebtoken": "^9.0.3",
         "node-cron": "^4.2.1",
+        "nodemailer": "^10.1.2",
         "passport": "^0.7.0",
         "passport-local": "^1.0.0",
         "pg": "^8.20.0",

@@ -1,3 +1,4 @@
+const { AppError } = require("../errors");
 const { pool } = require("../db");
 
 const TRANSACTION_FEE_PERCENT = 0.0095;
@@ -157,7 +158,7 @@ async function create({
 
             const userPortfolio = portfolioResult.rows[0];
             if (!userPortfolio) {
-                throw new Error("User portfolio not found");
+                throw new AppError(404, "PORTFOLIO_NOT_FOUND", "User portfolio not found");
             }
 
             const tradeAmount = Number(amount);
@@ -177,7 +178,7 @@ async function create({
                 const stableReceived = fiatSpent * Number(curr_price || 1);
 
                 if (Number(userPortfolio.fiat_amount || 0) < fiatSpent) {
-                    throw new Error("Insufficient fiat balance");
+                    throw new AppError(400, "INSUFFICIENT_FIAT", "Insufficient fiat balance");
                 }
 
                 await client.query(
@@ -191,7 +192,7 @@ async function create({
                 feeAmount = tradeAmount * feeRate;
 
                 if (Number(userPortfolio.stable_amount || 0) < tradeAmount) {
-                    throw new Error("Insufficient stable balance");
+                    throw new AppError(400, "INSUFFICIENT_STABLE", "Insufficient stable balance");
                 }
 
                 const fiatReceived = tradeTotal - tradeTotal * feeRate;
@@ -208,7 +209,7 @@ async function create({
                     Number(userPortfolio.stable_amount) <
                     tradeTotal + feeAmount
                 ) {
-                    throw new Error("Insufficient stable balance");
+                    throw new AppError(400, "INSUFFICIENT_STABLE", "Insufficient stable balance");
                 }
 
                 if (cryptoAsset) {
@@ -234,7 +235,7 @@ async function create({
                     !cryptoAsset ||
                     Number(cryptoAsset.amount || 0) < tradeAmount
                 ) {
-                    throw new Error("Insufficient crypto balance");
+                    throw new AppError(400, "INSUFFICIENT_CRYPTO", "Insufficient crypto balance");
                 }
 
                 cryptoAsset.amount = Number(cryptoAsset.amount) - tradeAmount;

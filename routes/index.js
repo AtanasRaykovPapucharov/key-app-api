@@ -50,7 +50,8 @@ router.use("/admin", requireAdmin, adminRoutes);
 getAllTables()
     .then((tables) => {
         for (const name of tables) {
-            if (name !== "users")
+            // Tables with credentials or internals never get generic routes
+            if (!["users", "auth_tokens", "schema_migrations"].includes(name))
                 router.use(`/${name}`, requireAdmin, tbl(name));
         }
     })
