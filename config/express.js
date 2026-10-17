@@ -33,13 +33,25 @@ module.exports = (express, app) => {
         .split(",")
         .map((o) => o.trim().replace(/\/+$/, ""))
         .filter(Boolean);
+    const warnedOrigins = new Set();
+    console.log(`[cors] allowed origins: ${allowedOrigins.join(", ")}`);
 
     app.use(helmet());
     app.use(pinoHttp({ logger }));
     app.use(
         cors({
-            origin: (origin, callback) =>
-                callback(null, !origin || allowedOrigins.includes(origin)),
+            origin: (origin, callback) => {
+                const allowed = !origin || allowedOrigins.includes(origin);
+                // Say why the browser shows a CORS error (once per site)
+                if (!allowed && !warnedOrigins.has(origin)) {
+                    warnedOrigins.add(origin);
+                    console.warn(
+                        `[cors] blocked requests from ${origin} — allowed: ${allowedOrigins.join(", ")}. ` +
+                            "Add it to CORS_ORIGIN (comma-separated) if it's your app.",
+                    );
+                }
+                callback(null, allowed);
+            },
             credentials: true,
             allowedHeaders: [
                 "Content-Type",
