@@ -14,14 +14,15 @@ const pool = require("../../config/pool");
 const { publicUser, signToken, requireAuth, forgetUser } = require("../../config/auth.js");
 const accounts = require("../../services/auth/accounts.js");
 const { issueToken, consumeToken, TTL } = require("../../services/auth/tokens.js");
-const { sendMail, isMailConfigured } = require("../../services/mail/mailer.js");
+const { sendMail, isMailEnabled } = require("../../services/mail/mailer.js");
 const templates = require("../../services/mail/templates.js");
 
 const USERNAME_MIN = 3;
 const USERNAME_MAX = 50;
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 200;
-const REQUIRE_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === "true";
+// Verification can only be required when emails can actually be sent
+const requireVerification = () => process.env.REQUIRE_EMAIL_VERIFICATION === "true" && isMailEnabled();
 
 // Where the links in emails point (the client app), e.g. https://keyappui.vercel.app
 const APP_URL = (process.env.APP_URL || process.env.CORS_ORIGIN || "http://localhost:9000")
@@ -32,6 +33,8 @@ const APP_URL = (process.env.APP_URL || process.env.CORS_ORIGIN || "http://local
 const router = express.Router();
 
 const fail = (res, status, code, message) => res.status(status).json({ code, message });
+const emailDisabled = (res) =>
+    fail(res, 503, "EMAIL_DISABLED", "Email isn’t set up on this server yet, so this feature is unavailable.");
 const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 function validatePassword(password) {
@@ -49,6 +52,7 @@ async function findWithPassword(userid) {
 }
 
 async function sendVerification(user, email) {
+    if (!isMailEnabled()) return { sent: false, reason: "disabled" };
     const token = await issueToken(user.userid, "verify_email", { email });
     const url = `${APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
     const msg = templates.verifyEmail({
@@ -61,11 +65,19 @@ async function sendVerification(user, email) {
 }
 
 async function notifyPasswordChanged(user) {
-    if (!user.email) return;
+    if (!user.email || !isMailEnabled()) return;
     await sendMail({ to: user.email, ...templates.passwordChanged({ locale: user.locale, name: user.username }) });
 }
 
 const authResponse = (user, extra = {}) => ({ user: publicUser(user), token: signToken(user), ...extra });
+
+// ── Public settings the client adapts to ───────────────────────────────────
+router.get("/config", (req, res) => {
+    res.json({
+        emailEnabled: isMailEnabled(),
+        emailVerificationRequired: requireVerification(),
+    });
+});
 
 // ── Register ────────────────────────────────────────────────────────────────
 router.post(
@@ -81,18 +93,22 @@ router.post(
         // '@' is reserved so a username can never be mistaken for an email at login
         if (/[@\s]/.test(username))
             return fail(res, 400, "INVALID_USERNAME", "Username can’t contain spaces or @.");
-        if (!accounts.isValidEmail(email)) return fail(res, 400, "INVALID_EMAIL", "Enter a valid email address.");
+        // Email is required only when the server can send email; while email is
+        // off it's optional (if given, it's saved for password reset later)
+        if (email || isMailEnabled()) {
+            if (!accounts.isValidEmail(email)) return fail(res, 400, "INVALID_EMAIL", "Enter a valid email address.");
+        }
         const pwError = validatePassword(password);
         if (pwError) return fail(res, 400, "INVALID_PASSWORD", pwError);
 
         if (await accounts.usernameTaken(username))
             return fail(res, 409, "USERNAME_TAKEN", "This username is already taken.");
-        if (await accounts.emailTaken(email))
+        if (email && (await accounts.emailTaken(email)))
             return fail(res, 409, "EMAIL_TAKEN", "An account with this email already exists.");
 
         let user;
         try {
-            user = await accounts.createAccount({ username, email, password, locale });
+            user = await accounts.createAccount({ username, email: email || null, password, locale });
         } catch (err) {
             if (err.code === "23505") {
                 return /email/i.test(`${err.constraint} ${err.detail}`)
@@ -102,9 +118,9 @@ router.post(
             throw err;
         }
 
-        const mail = await sendVerification(user, email);
+        const mail = email ? await sendVerification(user, email) : { sent: false };
 
-        if (REQUIRE_VERIFICATION)
+        if (requireVerification() && email)
             return res.status(201).json({
                 code: "VERIFY_EMAIL",
                 message: "Account created. Check your email to confirm your address, then log in.",
@@ -121,7 +137,7 @@ router.post("/login", (req, res, next) => {
     passport.authenticate("local", (err, user, info) => {
         if (err) return next(err);
         if (!user) return fail(res, 401, "INVALID_CREDENTIALS", info?.message || "Incorrect username or password.");
-        if (REQUIRE_VERIFICATION && user.email && !user.email_verified)
+        if (requireVerification() && user.email && !user.email_verified)
             return fail(res, 403, "EMAIL_NOT_VERIFIED", "Confirm your email address before logging in.");
 
         req.login(user, (loginErr) => {
@@ -155,6 +171,7 @@ router.post(
     "/resend-verification",
     requireAuth,
     asyncRoute(async (req, res) => {
+        if (!isMailEnabled()) return emailDisabled(res);
         const user = await accounts.findById(req.auth.id);
         if (!user?.email) return fail(res, 400, "NO_EMAIL", "Add an email address first.");
         if (user.email_verified) return fail(res, 400, "ALREADY_VERIFIED", "Your email is already confirmed.");
@@ -168,6 +185,7 @@ router.post(
 router.post(
     "/resend-verification-public",
     asyncRoute(async (req, res) => {
+        if (!isMailEnabled()) return emailDisabled(res);
         const user = await accounts.findByEmail(req.body.email);
         if (user && !user.email_verified) await sendVerification(user, user.email);
         // Same answer either way: don't reveal which emails have accounts
@@ -179,6 +197,7 @@ router.post(
 router.post(
     "/forgot-password",
     asyncRoute(async (req, res) => {
+        if (!isMailEnabled()) return emailDisabled(res);
         const email = accounts.normalizeEmail(req.body.email);
         if (!accounts.isValidEmail(email)) return fail(res, 400, "INVALID_EMAIL", "Enter a valid email address.");
 
@@ -197,7 +216,7 @@ router.post(
         // Same answer whether or not the account exists
         return res.json({
             message: "If an account uses this email, we sent a link to reset the password.",
-            mailConfigured: isMailConfigured(),
+            mailConfigured: true,
         });
     }),
 );

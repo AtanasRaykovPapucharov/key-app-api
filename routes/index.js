@@ -26,7 +26,7 @@ const router = express.Router();
 // ── Health check: open https://<api>/api/health in a browser ─────────────
 router.get("/health", async (req, res) => {
     const { migrationStatus } = require("../config/migrate.js");
-    const { isMailConfigured } = require("../services/mail/mailer.js");
+    const { isMailEnabled } = require("../services/mail/mailer.js");
     const pool = require("../config/pool.js");
     let db = false;
     try {
@@ -44,7 +44,7 @@ router.get("/health", async (req, res) => {
         ok,
         database: db ? "reachable" : "unreachable",
         migrations: migrations.error ? { error: migrations.error } : { status: "up to date", appliedNow: migrations.applied },
-        email: isMailConfigured() ? "configured" : "not configured (emails are not sent)",
+        email: isMailEnabled() ? "enabled" : "disabled (no SMTP settings) — accounts work without email",
         uptimeSeconds: Math.round(process.uptime()),
     });
 });

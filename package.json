@@ -5,7 +5,7 @@
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "test": "node test/security-smoke.js && node test/order-input.test.js && node test/email-auth.test.js",
+        "test": "node test/security-smoke.js && node test/order-input.test.js && node test/email-auth.test.js && node test/email-disabled.test.js",
         "migrate": "node config/migrate.js"
     },
     "dependencies": {
