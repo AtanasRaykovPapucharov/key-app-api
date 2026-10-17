@@ -18,7 +18,6 @@ const bankRoutes = require("./app/bank.js");
 const dailyRoutes = require("./app/daily.js");
 const traderRoutes = require("./app/trader.js");
 const portfolioRoutes = require("./app/portfolio.js");
-const musicNoteSheetRoutes = require("./app/music-note-sheet.js");
 const schedulerRoutes = require("./app/scheduler.js");
 const autoTradingRoutes = require("./app/autoTrading.js");
 
@@ -42,7 +41,6 @@ router.use("/user", requireAuth, userRoutes);
 router.use("/stocks-analysis", requireAuth, stocksAnalysisRoutes);
 router.use("/trader", requireAuth, traderRoutes);
 router.use("/portfolio", requireAuth, portfolioRoutes);
-router.use("/music-note-sheet", requireAuth, musicNoteSheetRoutes);
 router.use("/scheduler", requireAuth, schedulerRoutes);
 router.use("/auto-trading", requireAuth, autoTradingRoutes);
 
