@@ -23,6 +23,32 @@ const autoTradingRoutes = require("./app/autoTrading.js");
 
 const router = express.Router();
 
+// ── Health check: open https://<api>/api/health in a browser ─────────────
+router.get("/health", async (req, res) => {
+    const { migrationStatus } = require("../config/migrate.js");
+    const { isMailConfigured } = require("../services/mail/mailer.js");
+    const pool = require("../config/pool.js");
+    let db = false;
+    try {
+        await Promise.race([
+            pool.query("SELECT 1"),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+        ]);
+        db = true;
+    } catch {
+        db = false;
+    }
+    const migrations = migrationStatus();
+    const ok = db && !migrations.error;
+    res.status(ok ? 200 : 503).json({
+        ok,
+        database: db ? "reachable" : "unreachable",
+        migrations: migrations.error ? { error: migrations.error } : { status: "up to date", appliedNow: migrations.applied },
+        email: isMailConfigured() ? "configured" : "not configured (emails are not sent)",
+        uptimeSeconds: Math.round(process.uptime()),
+    });
+});
+
 // ── Public ──────────────────────────────────────────────────────────────
 router.use(authRoutes); // /login, /register, /logout
 router.use("/yahoo", yahooRoutes);

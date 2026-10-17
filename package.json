@@ -56,6 +56,6 @@
         "ccxt@4.5.85": true
     },
     "engines": {
-        "node": ">=18"
+        "node": ">=22"
     }
 }

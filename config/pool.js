@@ -12,6 +12,7 @@
 require("dotenv").config();
 
 const useHosted = Boolean(process.env.DATABASE_URL);
+const isProduction = process.env.NODE_ENV === "production";
 
 if (!useHosted && !process.env.PG_DB_HOST) {
     console.warn(
@@ -21,8 +22,10 @@ if (!useHosted && !process.env.PG_DB_HOST) {
 }
 
 // Only the selected module is loaded, so only one pool is ever created
-const pool = useHosted ? require("./neon.js") : require("./postgre.js");
+const pool = isProduction ? require("./neon.js") : require("./postgre.js");
 
-console.log(`[db] using ${useHosted ? "DATABASE_URL (hosted)" : "local PG_DB_* settings"}`);
+console.log(
+    `[db] using ${isProduction && useHosted ? "DATABASE_URL (hosted)" : "local PG_DB_* settings"}`,
+);
 
 module.exports = pool;

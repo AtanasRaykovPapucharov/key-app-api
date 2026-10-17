@@ -14,8 +14,15 @@ require("./config/express")(express, app);
 const server = http.createServer(app);
 
 async function start() {
-    // Bring the database schema up to date before accepting requests
-    await migrate();
+    // Bring the database schema up to date before accepting requests. If it
+    // fails, keep starting anyway: the API stays reachable, the error is
+    // logged, and GET /api/health shows what went wrong (a crash loop would
+    // only look like "can't reach the server" in the browser).
+    try {
+        await migrate();
+    } catch (err) {
+        console.error("[startup] database migration failed — email features won't work until it succeeds:", err.message);
+    }
 
     initWebSocket(server);
 
